@@ -24,6 +24,14 @@
   #pad button.on { background: rgba(255,255,255,.4); }
   #pad #fire { width: 104px; height: 104px; border-color: #ffe14d; color: #ffe14d; }
   #pad .sm { width: 46px; height: 46px; font-size: 11px; border-radius: 10px; }
+  #slide { pointer-events: auto; touch-action: none; position: relative; width: 182px; height: 84px;
+         background: rgba(255,255,255,.12); border: 2px solid rgba(255,255,255,.45); border-radius: 42px; }
+  #slide::before, #slide::after { content: ''; position: absolute; top: 50%; transform: translateY(-50%);
+         border: 7px solid transparent; }
+  #slide::before { left: 16px; border-right-color: rgba(255,255,255,.5); }
+  #slide::after { right: 16px; border-left-color: rgba(255,255,255,.5); }
+  #slideThumb { position: absolute; top: 4px; left: 4px; width: 76px; height: 76px; border-radius: 50%;
+         background: rgba(255,255,255,.4); pointer-events: none; }
   #mid { display: flex; flex-direction: column; gap: 10px; }
   @media (pointer: coarse) { #pad { display: flex; } }
   /* Landscape: game fills the height, controls sit on the side gutters, pause/mute tucked in the top-right. */
@@ -35,7 +43,7 @@
 <body>
 <canvas id="c"></canvas>
 <div id="pad">
-  <div class="grp"><button id="bl">&#9664;</button><button id="br">&#9654;</button></div>
+  <div class="grp"><div id="slide"><i id="slideThumb"></i></div></div>
   <div id="mid"><button id="bp" class="sm">PAUSE</button><button id="bm" class="sm">MUTE</button></div>
   <div class="grp"><button id="fire">FIRE</button></div>
 </div>
@@ -297,15 +305,20 @@ function update() {
 }
 
 function playerW() { return player.dual ? 27 : 13; }
+function playerBounds() { return [6 + 7, W - 6 - 7 - (player.dual ? 14 : 0)]; }   // the dual fighter is wider, so its right-hand bound shifts in
 
 function updatePlayer() {
   if (player.inv > 0) player.inv--;
   switch (player.state) {
     case 'ok': {
-      const l = keys['arrowleft'] || keys['a'], r = keys['arrowright'] || keys['d'];
-      if (l) player.x -= 1.6;
-      if (r) player.x += 1.6;
-      player.x = Math.max(6 + 7, Math.min(W - 6 - 7 - (player.dual ? 14 : 0), player.x));
+      if (slideX !== null) player.x = slideX;
+      else {
+        const l = keys['arrowleft'] || keys['a'], r = keys['arrowright'] || keys['d'];
+        if (l) player.x -= 1.6;
+        if (r) player.x += 1.6;
+      }
+      { const [pMin, pMax] = playerBounds(); player.x = Math.max(pMin, Math.min(pMax, player.x)); }
+      syncSliderThumb();
       if (fireCd > 0) fireCd--;
       const want = firePressed || keys[' '];
       const cap = player.dual ? 4 : 2;
@@ -684,7 +697,28 @@ function hold(id, key, onDown) {
   for (const t of ['pointerup', 'pointercancel', 'lostpointercapture']) el.addEventListener(t, () => set(false));
   el.addEventListener('contextmenu', e => e.preventDefault());
 }
-hold('bl', 'arrowleft'); hold('br', 'arrowright'); hold('fire', ' ', pressFire);   // holding FIRE auto-fires
+hold('fire', ' ', pressFire);   // holding FIRE auto-fires
+// Left/right is a touch slider spanning the old two-button width: dragging anywhere across it sets the ship's x position
+// directly and proportionally (not a relative drag), so the thumb is always exactly where the ship is.
+let slideX = null;
+function setupSlider() {
+  const track = document.getElementById('slide');
+  const apply = e => {
+    const [pMin, pMax] = playerBounds(), rect = track.getBoundingClientRect(), frac = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    slideX = pMin + frac * (pMax - pMin);
+  };
+  track.addEventListener('pointerdown', e => { e.preventDefault(); track.setPointerCapture(e.pointerId); initAudio(); apply(e); });
+  track.addEventListener('pointermove', e => { if (slideX !== null) apply(e); });
+  for (const t of ['pointerup', 'pointercancel', 'lostpointercapture']) track.addEventListener(t, () => { slideX = null; });
+  track.addEventListener('contextmenu', e => e.preventDefault());
+}
+function syncSliderThumb() {
+  const thumb = document.getElementById('slideThumb'), track = document.getElementById('slide');
+  const [pMin, pMax] = playerBounds(), travel = track.clientWidth - 8 - thumb.clientWidth;
+  const frac = (player.x - pMin) / (pMax - pMin);
+  thumb.style.left = (4 + frac * travel) + 'px';
+}
+setupSlider();
 for (const [id, fn] of [['bp', togglePause], ['bm', toggleMute]])
   document.getElementById(id).addEventListener('pointerdown', e => { e.preventDefault(); initAudio(); fn(); });
 cv.addEventListener('pointerdown', () => { initAudio(); if (st === 'title' || st === 'over') startGame(); });
